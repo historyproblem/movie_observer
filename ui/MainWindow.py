@@ -1,42 +1,42 @@
+from PyQt6.QtGui import QCloseEvent, QIntValidator
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QLabel, QStackedWidget,
-    QFormLayout
+    QFormLayout, QMessageBox
 )
 from back.Collection import MovieCollection
 from back.Movie import Movie
-
+from datetime import datetime
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.collection = MovieCollection()
         self.current_filters = {}
-        self.setup_ui()  # Вызываем метод настройки интерфейса
+        self.setup_ui()
+        self.setup_validators()
 
     def setup_ui(self):
-        """Инициализация всего интерфейса"""
         self.setWindowTitle("Movie Manager")
         self.setGeometry(100, 100, 600, 400)
 
-        # Создаем stacked widget для переключения экранов
         self.stacked_widget = QStackedWidget()
         self.setCentralWidget(self.stacked_widget)
 
-        # Инициализация экранов
         self.setup_add_movie_screen()
         self.setup_view_movies_screen()
 
-        # Добавляем экраны в stacked widget
         self.stacked_widget.addWidget(self.add_movie_widget)
         self.stacked_widget.addWidget(self.view_movies_widget)
 
+    def setup_validators(self):
+        current_year = datetime.now().year
+        self.year_input.setValidator(QIntValidator(1900, current_year, self))
+
     def setup_view_movies_screen(self):
-        """Экран просмотра и поиска фильмов"""
         self.view_movies_widget = QWidget()
         layout = QVBoxLayout()
 
-        # Форма для поиска
         search_form = QWidget()
         form_layout = QFormLayout()
 
@@ -49,7 +49,6 @@ class MainWindow(QMainWindow):
         form_layout.addRow("Жанр:", self.search_genre)
         search_form.setLayout(form_layout)
 
-        # Кнопки поиска и сброса
         btn_layout = QHBoxLayout()
         search_btn = QPushButton("Поиск")
         search_btn.clicked.connect(self.apply_filters)
@@ -60,10 +59,8 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(search_btn)
         btn_layout.addWidget(reset_btn)
 
-        # Список фильмов
         self.movies_list = QListWidget()
 
-        # Кнопка назад
         back_btn = QPushButton("Назад")
         back_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
 
@@ -72,18 +69,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.movies_list)
         layout.addWidget(back_btn)
         self.view_movies_widget.setLayout(layout)
+        self.update_movies_list()
 
     def setup_add_movie_screen(self):
-        """Экран добавления фильма"""
         self.add_movie_widget = QWidget()
         layout = QVBoxLayout()
 
-        # Поля ввода
         self.title_input = QLineEdit()
         self.year_input = QLineEdit()
         self.genre_input = QLineEdit()
 
-        # Добавляем элементы
         layout.addWidget(QLabel("Название фильма:"))
         layout.addWidget(self.title_input)
         layout.addWidget(QLabel("Год выпуска:"))
@@ -91,19 +86,20 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Жанр:"))
         layout.addWidget(self.genre_input)
 
-        # Кнопки
         add_btn = QPushButton("Добавить фильм")
         add_btn.clicked.connect(self.add_movie)
 
         view_btn = QPushButton("Просмотр фильмов")
-        view_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(1))
+        view_btn.clicked.connect(lambda: [
+            self.stacked_widget.setCurrentIndex(1),
+            self.update_movies_list()  # Обновление при каждом переходе
+        ])
 
         layout.addWidget(add_btn)
         layout.addWidget(view_btn)
         self.add_movie_widget.setLayout(layout)
 
     def apply_filters(self):
-        # Собираем критерии поиска
         self.current_filters = {
             "title": self.search_title.text().strip().lower(),
             "year": self.search_year.text().strip(),
@@ -119,11 +115,38 @@ class MainWindow(QMainWindow):
         self.update_movies_list()
 
     def add_movie(self):
-        title = self.title_input.text().strip()
-        year = self.year_input.text().strip()
-        genre = self.genre_input.text().strip()
+        try:
+            title = self.title_input.text().strip()
+            year = self.year_input.text().strip()
+            genre = self.genre_input.text().strip()
 
-        if title and year and genre:
+            # Проверка на пустые поля
+            if not (title and year and genre):
+                QMessageBox.warning(self, "Ошибка", "Все поля обязательны для заполнения!")
+                return
+
+            # Проверка, что год - число
+            if not year.isdigit():
+                QMessageBox.warning(
+                    self,
+                    "Ошибка",
+                    "Год должен содержать только цифры"
+                )
+                return
+
+            # Валидация года
+            current_year = datetime.now().year  # Определяем ДО блока try
+            year_int = int(year)
+
+            if year_int < 1900 or year_int > current_year:
+                QMessageBox.warning(
+                    self,
+                    "Ошибка",
+                    f"Год должен быть между 1900 и {current_year}"
+                )
+                return
+
+            # Добавление фильма
             movie = Movie(title, year, genre)
             self.collection.add_movie(movie)
             self.title_input.clear()
@@ -131,30 +154,50 @@ class MainWindow(QMainWindow):
             self.genre_input.clear()
             self.update_movies_list()
 
-
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                f"Не удалось добавить фильм: {str(e)}"
+            )
 
     def update_movies_list(self):
-        self.movies_list.clear()
-        for movie in self.collection:
-            # Проверяем соответствие фильтрам
-            match = True
+        try:
+            self.movies_list.clear()
+            for movie in self.collection:
+                match = True
 
-            # Проверка названия
-            if self.current_filters.get("title"):
-                if self.current_filters["title"] not in movie.title.lower():
-                    match = False
+                if self.current_filters.get("title"):
+                    if self.current_filters["title"] not in movie.title.lower():
+                        match = False
 
-            # Проверка года
-            if self.current_filters.get("year"):
-                if self.current_filters["year"] != movie.year:
-                    match = False
+                if self.current_filters.get("year"):
+                    if self.current_filters["year"] != movie.year:
+                        match = False
 
-            # Проверка жанра
-            if self.current_filters.get("genre"):
-                if self.current_filters["genre"] not in movie.genre.lower():
-                    match = False
+                if self.current_filters.get("genre"):
+                    if self.current_filters["genre"] not in movie.genre.lower():
+                        match = False
 
-            if match:
-                self.movies_list.addItem(
-                    f"{movie.title} ({movie.year}) - {movie.genre}"
-                )
+                if match:
+                    self.movies_list.addItem(
+                        f"{movie.title} ({movie.year}) - {movie.genre}"
+                    )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                f"Не удалось обновить список: {str(e)}"
+            )
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        try:
+            self.collection.save_to_file()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Ошибка сохранения",
+                f"Не удалось сохранить данные: {str(e)}"
+            )
+        finally:
+            event.accept()
